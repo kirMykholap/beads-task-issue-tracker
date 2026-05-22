@@ -19,9 +19,36 @@ const defaultRender =
     return self.renderToken(tokens, idx, options)
   }
 
+/**
+ * Convert a raw absolute path (Windows `C:\...` / `C:/...` or POSIX `/foo/...`)
+ * with optional `:LINE[:COL]` suffix into a `cursor://file/...` deep-link href.
+ * Returns null if the href doesn't look like an absolute path — leave it alone.
+ */
+function absolutePathToCursorHref(href: string): string | null {
+  // Windows drive-letter form (C:\... or C:/...)
+  const winMatch = href.match(/^([A-Za-z]:[\\/][^:]*?)(?::(\d+)(?::(\d+))?)?$/)
+  if (winMatch && winMatch[1]) {
+    const normalized = winMatch[1].replace(/\\/g, '/')
+    let cursorHref = `cursor://file/${encodeURI(normalized)}`
+    if (winMatch[2]) {
+      cursorHref += `?line=${winMatch[2]}`
+      if (winMatch[3]) cursorHref += `&col=${winMatch[3]}`
+    }
+    return cursorHref
+  }
+  return null
+}
+
 md.renderer.rules.link_open = function (tokens, idx, options, env, self) {
   const token = tokens[idx]
   if (token) {
+    // Rewrite raw absolute-path hrefs (e.g. `[CLAUDE.md](C:\Projects\WD\CLAUDE.md)`)
+    // into `cursor://file/...` so DOMPurify accepts them and the click opens Cursor.
+    const rawHref = token.attrGet('href') || ''
+    const cursorHref = absolutePathToCursorHref(rawHref)
+    if (cursorHref) {
+      token.attrSet('href', cursorHref)
+    }
     // Add target="_blank" and rel="noopener noreferrer" to all links
     token.attrSet('target', '_blank')
     token.attrSet('rel', 'noopener noreferrer')
@@ -152,16 +179,21 @@ const purifyConfig = {
 export function wrapAbsolutePathsInLinks(text: string): string {
   // Lookbehind avoids re-wrapping paths already inside markdown link syntax
   // (e.g. `](C:/foo/bar)` or `[C:/foo/bar]`) and inline-code (`` ` ``).
+  // Path body excludes whitespace, brackets, quotes, parens AND `:` so the
+  // optional `:NN[:CC]` line/column suffix is captured separately rather than
+  // greedily absorbed into the path. Dots stay inside the path so filenames
+  // like `.beads/PRIME.md` or `CLAUDE.md` survive intact.
   const pathRegex =
-    /(?<![\[("'`>])([A-Za-z]:[\\/][^\s<>"'`)\]]+?)(?::(\d+)(?::(\d+))?)?(?=[\s,.!?;:)\]]|$)/g
-  return text.replace(pathRegex, (match, path: string, line?: string, col?: string) => {
+    /(?<![\[("'`>\\/])([A-Za-z]:[\\/][^\s<>"'`():\]\[]+)(?::(\d+)(?::(\d+))?)?/g
+  return text.replace(pathRegex, (_match, path: string, line?: string, col?: string) => {
     const normalized = path.replace(/\\/g, '/')
     let href = `cursor://file/${encodeURI(normalized)}`
     if (line) {
       href += `?line=${line}`
       if (col) href += `&col=${col}`
     }
-    return `[${match}](${href})`
+    const displayed = path + (line ? `:${line}${col ? `:${col}` : ''}` : '')
+    return `[${displayed}](${href})`
   })
 }
 
