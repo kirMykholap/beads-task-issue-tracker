@@ -202,9 +202,27 @@ export function wrapAbsolutePathsInLinks(text: string): string {
  * @param text - Markdown text to render
  * @returns Sanitized HTML string
  */
+/**
+ * markdown-it treats `\` as an escape character inside link destinations,
+ * so `[X](C:\Projects\WD\CLAUDE.md)` arrives at link_open with href
+ * `C:ProjectsWDCLAUDE.md` — backslashes silently consumed.
+ * Convert backslashes to forward slashes inside `](...)` destinations BEFORE
+ * md.parse so the path survives. Doesn't touch backslashes elsewhere
+ * (description prose, code blocks, etc.).
+ */
+export function normalizeBackslashesInLinkDests(text: string): string {
+  return text.replace(/\]\(([^)]+)\)/g, (_match, dest: string) => {
+    // Only rewrite if destination looks like an absolute Windows path
+    if (/^[A-Za-z]:[\\/]/.test(dest)) {
+      return `](${dest.replace(/\\/g, '/')})`
+    }
+    return _match
+  })
+}
+
 export function renderMarkdown(text: string): string {
   if (!text) return ''
-  const preprocessed = wrapAbsolutePathsInLinks(text)
+  const preprocessed = normalizeBackslashesInLinkDests(wrapAbsolutePathsInLinks(text))
   const html = md.render(preprocessed)
   return DOMPurify.sanitize(html, purifyConfig) as string
 }
