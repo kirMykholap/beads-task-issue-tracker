@@ -137,6 +137,32 @@ const purifyConfig = {
     'td',
   ],
   ALLOWED_ATTR: ['href', 'target', 'rel', 'data-external-link'],
+  // Default DOMPurify URI regexp blocks unknown schemes (cursor:, vscode:, file:).
+  // Extend it so editor deep-links survive sanitization.
+  ALLOWED_URI_REGEXP:
+    /^(?:(?:(?:f|ht)tps?|cursor|vscode|file|mailto|tel):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i,
+}
+
+/**
+ * Detect Windows / POSIX absolute paths in raw markdown and wrap them in
+ * `[path](cursor://file/<path>)` so they render as Cursor deep-links.
+ * Skips paths already inside markdown link syntax (preceded by `]( ` or `[`).
+ * Supports optional `:LINE` and `:LINE:COL` suffixes (Cursor honors `?line=` / `&col=`).
+ */
+export function wrapAbsolutePathsInLinks(text: string): string {
+  // Lookbehind avoids re-wrapping paths already inside markdown link syntax
+  // (e.g. `](C:/foo/bar)` or `[C:/foo/bar]`) and inline-code (`` ` ``).
+  const pathRegex =
+    /(?<![\[("'`>])([A-Za-z]:[\\/][^\s<>"'`)\]]+?)(?::(\d+)(?::(\d+))?)?(?=[\s,.!?;:)\]]|$)/g
+  return text.replace(pathRegex, (match, path: string, line?: string, col?: string) => {
+    const normalized = path.replace(/\\/g, '/')
+    let href = `cursor://file/${encodeURI(normalized)}`
+    if (line) {
+      href += `?line=${line}`
+      if (col) href += `&col=${col}`
+    }
+    return `[${match}](${href})`
+  })
 }
 
 /**
@@ -146,6 +172,7 @@ const purifyConfig = {
  */
 export function renderMarkdown(text: string): string {
   if (!text) return ''
-  const html = md.render(text)
+  const preprocessed = wrapAbsolutePathsInLinks(text)
+  const html = md.render(preprocessed)
   return DOMPurify.sanitize(html, purifyConfig) as string
 }

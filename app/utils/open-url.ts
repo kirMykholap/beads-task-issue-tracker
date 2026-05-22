@@ -9,12 +9,14 @@ function isTauri(): boolean {
 }
 
 /**
- * Validate that a URL uses a safe protocol (http or https only)
+ * Validate that a URL uses a safe protocol.
+ * Allows http/https plus editor schemes (cursor://, vscode://) and local file:// so
+ * paths in descriptions/notes can deep-link into the editor instead of the browser.
  */
 export function isValidUrl(url: string): boolean {
   try {
     const parsed = new URL(url)
-    return ['http:', 'https:'].includes(parsed.protocol)
+    return ['http:', 'https:', 'cursor:', 'vscode:', 'file:'].includes(parsed.protocol)
   } catch {
     return false
   }
